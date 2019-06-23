@@ -145,11 +145,11 @@ function compute_laplacian(adjmat::AbstractMatrix, node_weights::AbstractVector)
     adjmat = adjmat .* sqrt(node_weights * node_weights')
 
     # D is a diagonal matrix with the degrees (total weights for that node) on the diagonal
-    deg = vec(sum(adjmat,1)) - diag(adjmat)
-    D = diagm(deg)
+    deg = vec(sum(adjmat; dims=1)) - diag(adjmat)
+    D = diagm(0 => deg)
 
     # Laplacian (L = D - adjmat)
-    L = Float64[i == j ? deg[i] : -adjmat[i,j] for i=1:n,j=1:n]
+    L = eltype(adjmat)[i == j ? deg[i] : -adjmat[i,j] for i=1:n,j=1:n]
 
     L, D
 end
@@ -227,7 +227,8 @@ end
                    func = get(_graph_funcs, method, by_axis_local_stress_graph),
                    shorten = 0.0,
                    axis_buffer = 0.2,
-                   layout_kw = Dict{Symbol,Any}()
+                   layout_kw = Dict{Symbol,Any}(),
+                   edgewidth = (s,d,w)->1
                   )
     @assert dim in (2, 3)
     _3d = dim == 3
@@ -294,21 +295,23 @@ end
             #zlims --> (zcenter-ahw, zcenter+ahw)
         end
     else
-        #xlims --> Plots.extrema_plus_buffer(x, axis_buffer)
-        #ylims --> Plots.extrema_plus_buffer(y, axis_buffer)
+        xlims --> extrema_plus_buffer(x, axis_buffer)
+        ylims --> extrema_plus_buffer(y, axis_buffer)
         if _3d
-            #zlims --> Plots.extrema_plus_buffer(z, axis_buffer)
+            zlims --> extrema_plus_buffer(z, axis_buffer)
         end
     end
 
     # create a series for the line segments
     if get(plotattributes, :linewidth, 1) > 0
-        @series begin
-            xseg = Vector{Float64}()
-            yseg = Vector{Float64}()
-            zseg = Vector{Float64}()
-            l_wg = Vector{Float64}()
-            for (si, di, wi) in zip(source, destiny, weights)
+        # generate a list of colors, one per segment
+        segment_colors = get(plotattributes, :linecolor, nothing)
+        for (i, (si, di, wi)) in enumerate(zip(source, destiny, weights))
+            @series begin
+                xseg = Vector{Float64}()
+                yseg = Vector{Float64}()
+                zseg = Vector{Float64}()
+                l_wg = Vector{Float64}()
 
                 # TO DO : Colouring edges by weight
                 # add a line segment
@@ -362,21 +365,20 @@ end
                     _3d && push!(zseg, z[si], z[di], NaN)
                     push!(l_wg, wi)
                 end
-            end
 
-            # generate a list of colors, one per segment
-            grad = get(plotattributes, :linecolor, nothing)
-            if isa(grad, ColorGradient)
-                line_z := l_wg
+            if isa(segment_colors, ColorGradient)
+                line_z := segment_colors[i]
             end
-
+            linewidthattr = get(plotattributes, :linewidth, 1)
             seriestype := (curves ? :curves : (_3d ? :path3d : :path))
             series_annotations := nothing
-            linewidth --> 1
+            linewidth --> linewidthattr * edgewidth(si, di, wi)
             markershape := :none
             markercolor := :black
             primary := false
             _3d ? (xseg, yseg, zseg) : (xseg, yseg)
+            end
+
         end
     end
 
@@ -430,4 +432,8 @@ end
         end
     end
     xyz
+end
+
+@recipe function f(g::AbstractGraph)
+    GraphPlot(get_source_destiny_weight(get_adjacency_list(g)))
 end
