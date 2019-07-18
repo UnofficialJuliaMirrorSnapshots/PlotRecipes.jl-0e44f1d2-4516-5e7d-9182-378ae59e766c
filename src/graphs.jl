@@ -1,5 +1,9 @@
 const _graph_funcs = Dict{Symbol,Any}(
     :spectral => spectral_graph,
+    :sfdp => sfdp_graph,
+    :circular => circular_graph,
+    :shell => shell_graph,
+    :spring => spring_graph,
     :stress => by_axis_local_stress_graph,
     :tree => tree_graph,
     :buchheim => buchheim_graph,
@@ -9,7 +13,11 @@ const _graph_funcs = Dict{Symbol,Any}(
 
 const _graph_inputs = Dict{Symbol,Any}(
     :spectral => :adjmat,
+    :sfdp => :adjmat,
+    :circular => :adjmat,
+    :shell => :adjmat,
     :stress => :adjmat,
+    :spring => :adjmat,
     :tree => :sourcedestiny,
     :buchheim => :adjlist,
     :arcdiagram => :sourcedestiny,
@@ -237,6 +245,7 @@ end
                    edgelabel = nothing,
                    edgelabel_offset = 0.0,
                    self_edge_size = 0.1,
+                   edge_label_box = true,
                   )
     @assert dim in (2, 3)
     _3d = dim == 3
@@ -401,7 +410,7 @@ end
                 # For directed graphs, shorten the line segment so that the edge ends at
                 # the perimeter of the destiny node.
                 θ = (edge_has_been_seen[(si, di)] - 1)*pi/8
-                if isdirected && si != di
+                if isdirected && si != di && !_3d
                     α = atan(y[si] - y[di], x[si] - x[di])
                     if sign(si - di) < 0
                         α = x[si] < x[di] ? θ + α : α - θ
@@ -463,7 +472,7 @@ end
                     push!(yseg, ysi, ydi, NaN)
                     _3d && push!(zseg, z[si], z[di], NaN)
                 end
-            if si == di
+            if si == di && !_3d
                 inds = 1:n .!= si
                 self_edge_angle = pi/8 + (edge_has_been_seen[(si, di)] - 1)*pi/8
                 θ1 = unoccupied_angle(xsi, ysi, x[inds], y[inds]) - self_edge_angle/2
@@ -505,13 +514,6 @@ end
                 append!(xseg, push!(xpts, NaN))
                 append!(yseg, push!(ypts, NaN))
             end
-            if !isnothing(edgelabel) && haskey(edgelabel, (si, di))
-                @assert !_3d  # TODO: make this work in 3D
-                q = control_point(xsi, xdi, ysi, ydi,
-                                  (curvature_scalar + edgelabel_offset)*sign(si - di))
-                push!(edge_label_array,
-                      (q..., string(edgelabel[(si, di)]), fontsize))
-            end
 
             if isa(segment_colors, ColorGradient)
                 line_z := segment_colors[i]
@@ -538,6 +540,34 @@ end
             _3d ? (xseg, yseg, zseg) : (xseg, yseg)
             end
 
+        end
+    end
+
+    for (i, (si, di, wi)) in enumerate(zip(source, destiny, weights))
+        edge_has_been_seen[(si, di)] += 1
+        xsi, ysi, xdi, ydi = shorten_segment(x[si], y[si], x[di], y[di], shorten)
+        if !isnothing(edgelabel) && haskey(edgelabel, (si, di))
+            @assert !_3d  # TODO: make this work in 3D
+            q = control_point(xsi, xdi, ysi, ydi,
+                              (curvature_scalar + edgelabel_offset)*sign(si - di))
+            push!(edge_label_array,
+                  (q..., string(edgelabel[(si, di)]), fontsize))
+            edge_label_box_vertices = annotation_extent(plotattributes, (q[1], q[2],
+                                               edgelabel[(si, di)], 0.05fontsize))
+            if edge_label_box
+                @series begin
+                    seriestype := :shape
+                    fillcolor --> get(plotattributes, :background_color, :white)
+                    linewidth := 0
+                    linealpha := 0
+                    ([edge_label_box_vertices[1][1], edge_label_box_vertices[1][2],
+                      edge_label_box_vertices[1][2], edge_label_box_vertices[1][1],
+                      edge_label_box_vertices[1][1]],
+                     [edge_label_box_vertices[2][1], edge_label_box_vertices[2][1],
+                      edge_label_box_vertices[2][2], edge_label_box_vertices[2][2],
+                      edge_label_box_vertices[2][1]])
+                end
+            end
         end
     end
 
@@ -574,7 +604,7 @@ end
                 linewidth := 0
                 linealpha := 0
                 series_annotations --> map(string,names)
-                markersize --> 100*(10 .+ (100 .* node_weights) ./ sum(node_weights))
+                markersize --> (10 .+ (100 .* node_weights) ./ sum(node_weights))
             else
                 for (i, vec_xy) in enumerate(node_vec_vec_xy)
                     @series begin
